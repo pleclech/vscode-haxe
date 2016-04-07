@@ -580,8 +580,7 @@ HaxeContext.prototype = {
 		var _gthis = this;
 		var time = new Date().getTime();
 		if(this.checkForDiagnostic && !(this.diagnosticStart > this.lastDiagnostic)) {
-			var dlt = time - this.lastDiagnostic;
-			if(dlt >= this.configuration.haxeDiagnosticDelay) {
+			if(time - this.lastDiagnostic >= this.configuration.haxeDiagnosticDelay) {
 				if(this.client.isPatchAvailable) {
 					var dd = this.getDirtyDocuments();
 					var cnt = dd.length;
@@ -589,8 +588,7 @@ HaxeContext.prototype = {
 					var _g1 = 0;
 					var _g = dd.length;
 					while(_g1 < _g) {
-						var i = _g1++;
-						var ds = dd[i];
+						var ds = dd[_g1++];
 						var document = ds.document;
 						--cnt;
 						if(!needDiagnose) {
@@ -598,7 +596,9 @@ HaxeContext.prototype = {
 						} else {
 							needDiagnose = true;
 						}
-						this.diagnostics["delete"](document.uri);
+						if(document != null) {
+							this.diagnostics["delete"](document.uri);
+						}
 						this.patchFullDocument(ds).then(function(ds1) {
 							if(cnt == 0 && needDiagnose) {
 								_gthis.diagnose(1);
@@ -612,15 +612,17 @@ HaxeContext.prototype = {
 					var tmp = new haxe_ds__$StringMap_StringMapIterator(_this,_this.arrayKeys());
 					while(tmp.hasNext()) {
 						var ds2 = tmp.next();
-						var document1 = ds2.document;
-						if(document1 == null) {
+						if(ds2.document == null) {
 							continue;
 						}
 						if(ds2.document != null && ds2.lastModification > ds2.lastSave) {
 							if(!(ds2.lastSave < ds2.saveStartAt)) {
 								isDirty = true;
 								ds2.diagnoseOnSave = false;
-								this.diagnostics["delete"](ds2.document.uri);
+								var document1 = ds2.document;
+								if(document1 != null) {
+									this.diagnostics["delete"](document1.uri);
+								}
 								this.saveFullDocument(ds2);
 							}
 						} else if(!needDiagnose1) {
@@ -644,7 +646,7 @@ HaxeContext.prototype = {
 		this.context.subscriptions.push(Vscode.workspace.onDidChangeTextDocument($bind(this,this.changePatch)));
 		this.changeDebouncer = new Debouncer(300,$bind(this,this.changePatchs));
 		this.context.subscriptions.push(Vscode.workspace.onDidOpenTextDocument($bind(this,this.onOpenDocument)));
-		this.context.subscriptions.push(Vscode.workspace.onDidSaveTextDocument($bind(this,this.onSaveDocument)));
+		this.context.subscriptions.push(Vscode.workspace.onDidSaveTextDocument($bind(this,this.onSaveDocumentFromVSC)));
 		this.context.subscriptions.push(Vscode.workspace.onDidCloseTextDocument($bind(this,this.onCloseDocument)));
 		this.completionHandler = new features_CompletionHandler(this);
 		this.definitionHandler = new features_DefinitionHandler(this);
@@ -846,19 +848,27 @@ HaxeContext.prototype = {
 		}
 		return ds;
 	}
+	,removeTmpFile: function(ds) {
+		if(this.useTmpDir && ds.tmpPath != null && ds.tmpPath != ds.realPath) {
+			js_node_Fs.unlinkSync(ds.tmpPath);
+		}
+		ds.tmpPath = null;
+	}
 	,onCloseDocument: function(document) {
 		var path = document.uri.fsPath;
 		var ds = this.getDocumentState(path);
+		this.removeTmpFile(ds);
 		ds.document = null;
 		ds.realPath = null;
-		ds.tmpPath = null;
 		this.documentsState.remove(path);
 		this.documentsState.remove(Tool.normalize(path));
 		if(this.client.isPatchAvailable) {
 			this.client.cmdLine.save().beginPatch(path).remove();
 			this.client.sendAll(null,true);
 		}
-		this.diagnostics["delete"](document.uri);
+		if(document != null) {
+			this.diagnostics["delete"](document.uri);
+		}
 	}
 	,onOpenDocument: function(document) {
 		this.getDocumentState(document.uri.fsPath,document);
@@ -882,11 +892,22 @@ HaxeContext.prototype = {
 			});
 		});
 	}
-	,onSaveDocument: function(document) {
+	,onSaveDocumentFromVSC: function(document) {
+		this.onSaveDocument(document,true);
+	}
+	,onSaveDocument: function(document,saveFromVS) {
+		if(saveFromVS == null) {
+			saveFromVS = false;
+		}
 		var ds = this.getDocumentState(document.uri.fsPath,document);
 		ds.lastSave = new Date().getTime();
+		if(saveFromVS) {
+			this.removeTmpFile(ds);
+		}
 		if(ds.diagnoseOnSave) {
 			this.removeAndDiagnoseDocument(document);
+		} else if(document != null) {
+			this.diagnostics["delete"](document.uri);
 		}
 		ds.diagnoseOnSave = this.configuration.haxeDiagnoseOnSave;
 	}
@@ -909,8 +930,15 @@ HaxeContext.prototype = {
 			_gthis.applyDiagnostics(m1);
 		});
 	}
+	,undiagnoseDocument: function(document) {
+		if(document != null) {
+			this.diagnostics["delete"](document.uri);
+		}
+	}
 	,removeAndDiagnoseDocument: function(document) {
-		this.diagnostics["delete"](document.uri);
+		if(document != null) {
+			this.diagnostics["delete"](document.uri);
+		}
 		var path = document.uri.fsPath;
 		if(this.client.isPatchAvailable) {
 			this.client.cmdLine.beginPatch(path).remove();
